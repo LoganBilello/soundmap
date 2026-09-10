@@ -136,6 +136,35 @@ def load_origins() -> dict:
     return out
 
 
+def load_wikipedia() -> dict:
+    """Human-curated origins, the most precise source available.
+
+    Ranked above MusicBrainz because it is edited and cited rather than
+    inferred, is often finer than city level, carries a date, and does not
+    inherit Spotify's market bias -- so it covers African and Asian genres the
+    city data barely sees. Its limit is coverage, not accuracy: only ~a quarter
+    of genres have the field at all.
+    """
+    p = OUT / "wikipedia_origins.jsonl"
+    if not p.exists():
+        return {}
+    out = {}
+    for row in load_jsonl(p):
+        if not row.get("raw"):
+            continue
+        rec = {
+            "raw": row["raw"],
+            "date": row.get("date"),
+            "title": row.get("title"),
+            "level": row.get("level"),
+            "country": row.get("country"),
+        }
+        if row.get("level") == "city":
+            rec.update(place=row.get("place"), lat=row.get("lat"), lon=row.get("lon"))
+        out[row["slug"]] = rec
+    return out
+
+
 def main() -> int:
     jsonl, coords_p = OUT / "city_genres.jsonl", OUT / "city_coords.json"
     if not jsonl.exists() or not coords_p.exists():
@@ -147,6 +176,7 @@ def main() -> int:
     enrich = json.loads((OUT / "genres.json").read_text(encoding="utf-8")) if (OUT / "genres.json").exists() else {}
     raw_countries = json.loads((OUT / "country_genres.json").read_text(encoding="utf-8")) if (OUT / "country_genres.json").exists() else {}
     origins = load_origins()
+    wiki = load_wikipedia()
     ccname = country_names()
     for o in origins.values():
         o["country"] = ccname.get(o["cc"], o["cc"])
@@ -214,8 +244,12 @@ def main() -> int:
             "slug": slug, "name": m["name"], "color": m["color"],
             "lat": round(lat, 3), "lon": round(lon, 3), "n": len(h),
             "top": [[c, round(w, 1)] for c, w in sorted(h, key=lambda t: -t[1])[:TOP_CITIES]],
-            "origin": named,
-            "mb": origins.get(slug),
+            # Origin sources, strongest first. The frontend picks the best
+            # available and shows which one it came from, so a cited
+            # encyclopedia entry never reads the same as a statistical guess.
+            "wiki": wiki.get(slug),   # human-curated, may be city or country level
+            "mb": origins.get(slug),  # inferred from MusicBrainz artist areas
+            "origin": named,          # weakest: the genre's own name
             "preview": e.get("preview_url"),
             "example": e.get("example"),
         })
@@ -240,7 +274,9 @@ def main() -> int:
         "cities": len(cities), "genres": len(genres),
         "links": sum(len(c["g"]) for c in cities),
         "withAudio": sum(1 for g in genres if g["preview"]),
-        "withOrigin": sum(1 for g in genres if g["mb"] or g["origin"] is not None),
+        "withOrigin": sum(1 for g in genres if g["wiki"] or g["mb"] or g["origin"] is not None),
+        "withWiki": sum(1 for g in genres if g["wiki"]),
+        "withWikiCity": sum(1 for g in genres if (g["wiki"] or {}).get("level") == "city"),
         "withMbOrigin": sum(1 for g in genres if g["mb"]),
         "countries": len(countries),
         "enriched": bool(enrich),

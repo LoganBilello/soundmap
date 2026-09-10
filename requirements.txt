@@ -1,0 +1,7 @@
+# Python dependencies. The pipeline is otherwise stdlib-only.
+#
+# certifi supplies a current CA bundle. Python's OpenSSL on some systems trusts
+# a stale one that rejects Wikipedia's certificate chain (while still accepting
+# MusicBrainz and archive.org), so 08_wikipedia_origins.py cannot connect
+# without it. Verification is never disabled to work around this.
+certifi>=2024.2.2

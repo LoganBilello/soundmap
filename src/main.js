@@ -8,6 +8,7 @@ import { renderBasemap, pickCountry } from "./basemap.js";
 // lowercase "eSwatini", and abbreviations that read as typos at label size.
 const NAME_FIXES = {
   "eSwatini": "Eswatini",
+  "Côte d'Ivoire": "Cote d'Ivoire",
   "Dem. Rep. Congo": "DR Congo",
   "Central African Rep.": "Central African Republic",
   "Dominican Rep.": "Dominican Republic",
@@ -206,6 +207,17 @@ const labelPts = world.features
 
 let lastRank = -1;
 let lastLabelSize = -1;
+
+// ISO code -> the basemap's hand-placed label point, so a Wikipedia origin
+// known only to country level can still be shown somewhere sensible instead of
+// being discarded or given a fabricated centroid.
+const countryPoint = {};
+for (const f of world.features) {
+  const iso = f.properties.ISO_A2;
+  if (iso && iso !== "-99" && f.properties.LABEL_X != null) {
+    countryPoint[iso] = { lat: f.properties.LABEL_Y, lon: f.properties.LABEL_X };
+  }
+}
 
 function syncLabels() {
   // pointOfView() is not meaningful until the globe has initialised, and a
@@ -480,23 +492,70 @@ function showCity(c) {
   syncPlaying();
 }
 
+/**
+ * Best available origin, with its provenance.
+ *
+ * Declared, not a const arrow: showGenre() calls it and hoisting keeps the
+ * ordering from mattering.
+ *
+ * Order is deliberate. Wikipedia is human-edited and cited, is often finer than
+ * city level, carries a date, and does not inherit Spotify's market bias.
+ * MusicBrainz is a statistical inference over whoever happens to be catalogued.
+ * The genre's own name is a last resort. Each result says which it was, so a
+ * reader can weigh "Durban, Wikipedia" against "London, inferred from 61
+ * artists" rather than seeing them presented identically.
+ */
+function pickOrigin(g, named) {
+  const w = g.wiki;
+  if (w && w.level === "city" && w.lat != null) {
+    return {
+      lat: w.lat, lon: w.lon,
+      label: [w.place, ccName(w.country)].filter(Boolean).join(", "),
+      tag: "wikipedia", date: w.date, why: w.raw,
+    };
+  }
+  if (w && w.level === "country" && countryPoint[w.country]) {
+    const p = countryPoint[w.country];
+    return {
+      lat: p.lat, lon: p.lon, label: ccName(w.country) || w.country,
+      tag: "wikipedia · country", date: w.date, why: w.raw,
+    };
+  }
+  if (g.mb) {
+    return {
+      lat: g.mb.lat, lon: g.mb.lon,
+      label: `${g.mb.place}, ${g.mb.country ?? g.mb.cc}`,
+      tag: g.mb.confidence,
+      why: `${g.mb.artists} of ${g.mb.pool.toLocaleString()} tagged artists began here`
+         + ` · ${Math.round(g.mb.share * 100)}% of those placed · MusicBrainz`,
+    };
+  }
+  if (named) {
+    return {
+      lat: named.lat, lon: named.lon, label: `${named.city}, ${named.country}`,
+      tag: "inferred", why: "taken from the genre’s own name",
+    };
+  }
+  return null;
+}
+
+/** Country name from any city we already know in that country. */
+function ccName(code) {
+  if (!code) return null;
+  const c = state.cities.find((x) => x.cc === code);
+  return c ? c.country : code;
+}
+
 function showGenre(i) {
   const g = genres[i];
   state.view = { type: "genre", id: i };
   state.genre = i;
   repaint();
 
-  // Two origin signals, strongest first: MusicBrainz artist begin-areas, then
-  // the genre's own name ("detroit techno").
+  // Origin sources, strongest first. Wikipedia outranks MusicBrainz because it
+  // is edited and cited rather than inferred from who happens to be catalogued.
   const named = g.origin != null ? state.cities[g.origin] : null;
-  const origin = g.mb
-    ? { lat: g.mb.lat, lon: g.mb.lon, label: `${g.mb.place}, ${g.mb.country ?? g.mb.cc}`, tag: g.mb.confidence,
-        why: `${g.mb.artists} of ${g.mb.pool.toLocaleString()} tagged artists began here`
-             + ` · ${Math.round(g.mb.share * 100)}% of those placed · MusicBrainz` }
-    : named
-    ? { lat: named.lat, lon: named.lon, label: `${named.city}, ${named.country}`, tag: "inferred",
-        why: "taken from the genre’s own name" }
-    : null;
+  const origin = pickOrigin(g, named);
 
   // Influence arcs: origin -> every city that picked the sound up.
   if (origin) {
@@ -520,6 +579,7 @@ function showGenre(i) {
     ${origin ? `<div class="origin">
         <div class="eyebrow" style="margin:0">Origin<span class="badge">${esc(origin.tag)}</span></div>
         <div class="origin-p" style="color:${g.color}">${esc(origin.label)}</div>
+        ${origin.date ? `<div class="origin-d">${esc(origin.date)}</div>` : ""}
         <div class="origin-w">${esc(origin.why)}</div></div>` : ""}
     <div class="stat"><span>Listened to in</span><span>${g.n.toLocaleString()} ${g.n === 1 ? "city" : "cities"}</span></div>
     <div class="stat"><span>Centre of gravity</span><span>${g.lat.toFixed(1)}, ${g.lon.toFixed(1)}</span></div>
