@@ -149,7 +149,19 @@
   /* The card ignores pointer events so it never blocks dragging the globe,
      but the volume control inside it must still be usable. */
   #np.show { opacity: 1; transform: none; }
-  #np.show .vol { pointer-events: auto; }
+  /* Controls stay reachable even though the card itself is click-through,
+     so playback can be stopped from anywhere -- including after navigating
+     back to a city, where the genre panel's own stop button is gone. */
+  #np.show .vol, #np.show #np-stop { pointer-events: auto; }
+
+  #np-stop {
+    display: none; margin-left: auto; flex: none;
+    background: none; border: 1px solid var(--line2); border-radius: 5px;
+    color: var(--dim); cursor: pointer; font-size: 9px; line-height: 1;
+    padding: 5px 7px; transition: color .12s, border-color .12s;
+  }
+  #np.playing #np-stop { display: block; }
+  #np-stop:hover { color: var(--text); border-color: var(--accent); }
 
   .vol { display: none; align-items: center; gap: 9px; margin-top: 10px; }
   #np.playing .vol { display: flex; }
@@ -216,7 +228,11 @@
   </div>
 
   <div id="np">
-    <div class="t"><span class="bars"><i></i><i></i><i></i></span><span id="np-name"></span></div>
+    <div class="t">
+      <span class="bars"><i></i><i></i><i></i></span>
+      <span id="np-name"></span>
+      <button id="np-stop" type="button" aria-label="Stop playback" title="Stop">&#9632;</button>
+    </div>
     <div class="s" id="np-sub"></div>
     <div id="bar"><i></i></div>
     <div class="vol">

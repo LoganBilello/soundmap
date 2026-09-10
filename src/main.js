@@ -62,7 +62,14 @@ Object.assign(state, { cities, genres, countries, meta });
 $("#tagline").textContent =
   `${meta.cities.toLocaleString()} cities · ${meta.genres.toLocaleString()} genres · ${meta.withOrigin.toLocaleString()} located origins`;
 
-// Genres a city actually listens to; countries reference genres with no city data.
+// EVERY genre is searchable, not only those a city listens to. Two thirds of
+// the taxonomy has no city data -- suomisaundi, korean city pop, swedish drill
+// -- yet all of them have a preview clip and many have a documented origin.
+// Filtering them out of search made them unreachable for no reason.
+const allGenres = genres.map((_, i) => i);
+
+// Genres a city listens to, kept for the featured picks on the intro, where a
+// genre with somewhere to fly to makes a better first click.
 const live = genres.map((g, i) => (g.n > 0 ? i : -1)).filter((i) => i >= 0);
 
 // ---------------------------------------------------------------- audio
@@ -114,6 +121,10 @@ try {
   if (Number.isFinite(saved)) startVolume = saved;
 } catch {}
 applyVolume(startVolume, false);
+
+// Global stop. The genre panel's own button vanishes as soon as you navigate
+// back to a city or country, which left audio playing with nothing to stop it.
+$("#np-stop").addEventListener("click", () => player.stop());
 
 volEl.addEventListener("input", () => applyVolume(volEl.value / 100));
 muteEl.addEventListener("click", () => applyVolume(player.audio.volume > 0 ? 0 : lastAudible));
@@ -476,7 +487,34 @@ const cityChip = (id, w, color) => {
       ${w != null ? `<span class="w">${w}</span>` : ""}</button>`;
 };
 
-function showCity(c) {
+// ---------------------------------------------------------- navigation
+// Back used to always jump to the intro, so opening a genre from a city threw
+// away the city you came from. Views are recorded on a stack instead, and back
+// retraces the path you actually took.
+const history = [];
+
+function pushCurrent() {
+  const v = state.view ?? { type: "intro" };
+  const last = history[history.length - 1];
+  const same = last && last.type === v.type && last.id === v.id && last.key === v.key;
+  if (!same) history.push(v);
+}
+
+function renderView(v) {
+  if (!v || v.type === "intro") return showIntro();
+  if (v.type === "search") { $("#search").value = v.q; return search(v.q); }
+  if (v.type === "city") return showCity(state.cities[v.id], false);
+  if (v.type === "genre") return showGenre(v.id, false);
+  if (v.type === "country") return showCountry(v.key, false);
+  return showIntro();
+}
+
+function goBack() {
+  renderView(history.pop() ?? { type: "intro" });
+}
+
+function showCity(c, push = true) {
+  if (push) pushCurrent();
   state.view = { type: "city", id: c.id };
   state.genre = null;
   clearOverlays();
@@ -484,6 +522,7 @@ function showCity(c) {
   flyTo(c.lat, c.lon);
 
   body.innerHTML = `
+    ${history.length ? `<button class="back" data-back>&larr; back</button>` : ""}
     <div class="place">${esc(c.city)}</div>
     <div class="meta">${[c.region, c.country].filter(Boolean).map(esc).join(" · ")}${
       c.pop ? ` · pop ${c.pop.toLocaleString()}` : ""}</div>
@@ -533,7 +572,17 @@ function pickOrigin(g, named) {
   if (named) {
     return {
       lat: named.lat, lon: named.lon, label: `${named.city}, ${named.country}`,
-      tag: "inferred", why: "taken from the genre’s own name",
+      tag: "inferred", why: "a city named in the genre’s own name",
+    };
+  }
+  // Last resort, and the one that covers most of the tail: a nationality in
+  // the name. No encyclopedia will ever hold an article for "dutch cabaret",
+  // so the name is the only evidence that exists.
+  if (g.nat && countryPoint[g.nat]) {
+    const p = countryPoint[g.nat];
+    return {
+      lat: p.lat, lon: p.lon, label: ccName(g.nat) || g.nat,
+      tag: "inferred · country", why: "a nationality in the genre’s own name",
     };
   }
   return null;
@@ -546,7 +595,8 @@ function ccName(code) {
   return c ? c.country : code;
 }
 
-function showGenre(i) {
+function showGenre(i, push = true) {
+  if (push) pushCurrent();
   const g = genres[i];
   state.view = { type: "genre", id: i };
   state.genre = i;
@@ -569,7 +619,10 @@ function showGenre(i) {
   } else {
     clearOverlays();
   }
-  flyTo(origin ? origin.lat : g.lat, origin ? origin.lon : g.lon, 2.15);
+  // A genre with no cities has a centroid of 0,0, which is open ocean off
+  // west Africa. Only move the camera when there is somewhere real to go.
+  if (origin) flyTo(origin.lat, origin.lon, 2.15);
+  else if (g.n > 0) flyTo(g.lat, g.lon, 2.15);
 
   body.innerHTML = `
     <button class="back" data-back>&larr; back</button>
@@ -581,8 +634,9 @@ function showGenre(i) {
         <div class="origin-p" style="color:${g.color}">${esc(origin.label)}</div>
         ${origin.date ? `<div class="origin-d">${esc(origin.date)}</div>` : ""}
         <div class="origin-w">${esc(origin.why)}</div></div>` : ""}
-    <div class="stat"><span>Listened to in</span><span>${g.n.toLocaleString()} ${g.n === 1 ? "city" : "cities"}</span></div>
-    <div class="stat"><span>Centre of gravity</span><span>${g.lat.toFixed(1)}, ${g.lon.toFixed(1)}</span></div>
+    <div class="stat"><span>Listened to in</span><span>${
+      g.n ? `${g.n.toLocaleString()} ${g.n === 1 ? "city" : "cities"}` : "no city data"}</span></div>
+    ${g.n ? `<div class="stat"><span>Centre of gravity</span><span>${g.lat.toFixed(1)}, ${g.lon.toFixed(1)}</span></div>` : ""}
     <p class="hint" style="margin:15px 0 0">${
       origin
         ? "The ring marks where this sound <b>began</b>. The arcs trace it out to everywhere it is <b>listened to</b> now."
@@ -595,8 +649,14 @@ function showGenre(i) {
 
 function onCountry(f) {
   const c = countryOf(f);
+  if (c) showCountry(norm(c.name));
+}
+
+function showCountry(key, push = true) {
+  const c = state.countries[key];
   if (!c) return;
-  state.view = { type: "country", name: c.name };
+  if (push) pushCurrent();
+  state.view = { type: "country", key };
   state.genre = null;
   clearOverlays();
   repaint();
@@ -614,6 +674,9 @@ function onCountry(f) {
 }
 
 function showIntro() {
+  // The intro is home, so it is the bottom of the stack, not a step in it.
+  history.length = 0;
+  $("#search").value = "";
   state.view = null; state.genre = null;
   clearOverlays();
   repaint();
@@ -662,9 +725,11 @@ function search(raw) {
     .sort((a, b) => a.r - b.r || b.c.g.length - a.c.g.length)
     .slice(0, 7);
 
-  const gs = live
+  const gs = allGenres
     .map((i) => ({ i, r: rank(q, genres[i].name) }))
     .filter((x) => x.r >= 0)
+    // Match quality first, then genres with city data, so a well-known genre
+    // still outranks an obscure one that merely shares a prefix.
     .sort((a, b) => a.r - b.r || genres[b.i].n - genres[a.i].n)
     .slice(0, 14);
 
@@ -674,6 +739,11 @@ function search(raw) {
     (gs.length ? `<div class="eyebrow">Genres</div>` : "") +
     gs.map(({ i }) => chip(i, genres[i].n || null)).join("") +
     (!cs.length && !gs.length ? `<p class="hint">Nothing matches “${esc(raw)}”.</p>` : "");
+
+  // Recorded but never pushed: this runs on every keystroke, so stacking it
+  // would fill the history with half-typed queries. Opening a result pushes
+  // whatever the view was at that moment, which lands the search here.
+  state.view = { type: "search", q: raw };
   syncPlaying();
 }
 
@@ -691,18 +761,15 @@ body.addEventListener("click", (e) => {
   const c = e.target.closest("[data-city]");
   if (c) return showCity(state.cities[+c.dataset.city]);
 
-  if (e.target.closest("[data-back]")) {
-    $("#search").value = "";
-    return showIntro();
-  }
+  if (e.target.closest("[data-back]")) return goBack();
 });
 
 document.addEventListener("keydown", (e) => {
   const typing = e.target.tagName === "INPUT";
   if (e.key === "/" && !typing) { e.preventDefault(); $("#search").focus(); }
   else if (e.key === "Escape") {
-    if (typing) { e.target.value = ""; e.target.blur(); }
-    showIntro();
+    if (typing) { e.target.value = ""; e.target.blur(); showIntro(); }
+    else goBack();
   } else if (e.key === " " && !typing) {
     e.preventDefault();
     if (player.slug) player.stop();

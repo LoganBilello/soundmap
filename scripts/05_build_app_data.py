@@ -136,6 +136,90 @@ def load_origins() -> dict:
     return out
 
 
+# Nationality words that identify a country unambiguously. Genre names carry
+# these constantly ("dutch pop", "korean city pop", "swedish drill") and no
+# encyclopedia will ever hold an article for them, so the name is the only
+# evidence there is. Regional and continental words are deliberately absent:
+# "latin", "afro", "nordic", "balkan" and "arabic" name no single country.
+DEMONYMS = {
+    "afghan": "AF", "albanian": "AL", "algerian": "DZ", "andean": None,
+    "argentine": "AR", "argentinian": "AR", "armenian": "AM", "australian": "AU",
+    "austrian": "AT", "azerbaijani": "AZ", "bangladeshi": "BD", "belarusian": "BY",
+    "belgian": "BE", "bolivian": "BO", "bosnian": "BA", "brazilian": "BR",
+    "british": "GB", "bulgarian": "BG", "cambodian": "KH", "cameroonian": "CM",
+    "canadian": "CA", "chilean": "CL", "chinese": "CN", "colombian": "CO",
+    "congolese": "CD", "costa rican": "CR", "croatian": "HR", "cuban": "CU",
+    "cypriot": "CY", "czech": "CZ", "danish": "DK", "dominican": "DO",
+    "dutch": "NL", "ecuadorian": "EC", "egyptian": "EG", "english": "GB",
+    "estonian": "EE", "ethiopian": "ET", "filipino": "PH", "finnish": "FI",
+    "french": "FR", "georgian": "GE", "german": "DE", "ghanaian": "GH",
+    "greek": "GR", "guatemalan": "GT", "haitian": "HT", "hawaiian": "US",
+    "honduran": "HN", "hungarian": "HU", "icelandic": "IS", "indian": "IN",
+    "indonesian": "ID", "iranian": "IR", "iraqi": "IQ", "irish": "IE",
+    "israeli": "IL", "italian": "IT", "italo": "IT", "jamaican": "JM",
+    "japanese": "JP", "kazakh": "KZ", "kenyan": "KE", "korean": "KR",
+    "latvian": "LV", "lebanese": "LB", "lithuanian": "LT", "malaysian": "MY",
+    "maltese": "MT", "mexican": "MX", "moldovan": "MD", "mongolian": "MN",
+    "moroccan": "MA", "nepali": "NP", "nicaraguan": "NI", "nigerian": "NG",
+    "norwegian": "NO", "pakistani": "PK", "palestinian": "PS", "panamanian": "PA",
+    "paraguayan": "PY", "peruvian": "PE", "polish": "PL", "portuguese": "PT",
+    "puerto rican": "PR", "romanian": "RO", "russian": "RU", "salvadoran": "SV",
+    "saudi": "SA", "scottish": "GB", "senegalese": "SN", "serbian": "RS",
+    "singaporean": "SG", "slovak": "SK", "slovenian": "SI", "somali": "SO",
+    "spanish": "ES", "sudanese": "SD", "swedish": "SE", "swiss": "CH",
+    "taiwanese": "TW", "tanzanian": "TZ", "thai": "TH", "tunisian": "TN",
+    "turkish": "TR", "ugandan": "UG", "ukrainian": "UA", "uruguayan": "UY",
+    "uzbek": "UZ", "venezuelan": "VE", "vietnamese": "VN", "welsh": "GB",
+    "zambian": "ZM", "zimbabwean": "ZW",
+    # Endonyms that appear in genre names as often as the English forms.
+    "suomi": "FI", "nederpop": "NL", "nederhop": "NL", "deutsch": "DE",
+    "norsk": "NO", "svensk": "SE", "dansk": "DK", "turkce": "TR",
+    "brasileiro": "BR", "brasileira": "BR", "mexicano": "MX", "mexicana": "MX",
+    "espanol": "ES", "espanola": "ES", "argentino": "AR", "argentina": "AR",
+    "peruano": "PE", "peruana": "PE", "chileno": "CL", "chilena": "CL",
+    "colombiano": "CO", "colombiana": "CO", "cubano": "CU", "cubana": "CU",
+    "venezolano": "VE", "boliviana": "BO", "portugues": "PT", "tuga": "PT",
+}
+DEMONYMS = {k: v for k, v in DEMONYMS.items() if v}
+
+# City names that are also ordinary English words, or so short that a chance
+# substring match is likelier than a real reference.
+CITY_NAME_STOPWORDS = {
+    "nice", "bath", "reading", "mobile", "split", "hollywood", "sale", "bury",
+    "deal", "march", "wells", "boston", "york", "orange", "phoenix", "eureka",
+    "surprise", "hope", "liberty", "union", "industry", "commerce", "avon",
+    "kent", "essex", "surrey", "richmond", "victoria", "santa", "san", "santo",
+    "saint", "lake", "valley", "springs", "north", "south", "east", "west",
+    # Ordinary Spanish and Portuguese words that also open city names. "nuevo"
+    # put a Mexican regional genre in Nuevo Laredo; "grande" put a Michoacan
+    # harp style in Campo Grande, Brazil.
+    "nuevo", "nueva", "grande", "grande", "novo", "nova", "porto", "puerto",
+    "ciudad", "cidade", "villa", "vila", "campo", "monte", "playa", "punta",
+    "salto", "rio", "sierra", "costa", "isla", "mar", "sol", "cruz", "verde",
+    "central", "capital", "territory", "district", "county", "province",
+}
+
+# US states and similar first-level regions. A genre named for a state is not
+# a claim about its largest city: "kentucky roots" is not Louisville music.
+# These resolve to the country instead of inventing a city.
+REGION_COUNTRY = {
+    "alabama": "US", "alaska": "US", "arizona": "US", "arkansas": "US",
+    "california": "US", "colorado": "US", "connecticut": "US", "delaware": "US",
+    "florida": "US", "georgia": "US", "hawaii": "US", "idaho": "US",
+    "illinois": "US", "indiana": "US", "iowa": "US", "kansas": "US",
+    "kentucky": "US", "louisiana": "US", "maine": "US", "maryland": "US",
+    "massachusetts": "US", "michigan": "US", "minnesota": "US", "mississippi": "US",
+    "missouri": "US", "montana": "US", "nebraska": "US", "nevada": "US",
+    "ohio": "US", "oklahoma": "US", "oregon": "US", "pennsylvania": "US",
+    "tennessee": "US", "texas": "US", "utah": "US", "vermont": "US",
+    "virginia": "US", "washington": "US", "wisconsin": "US", "wyoming": "US",
+    "ontario": "CA", "quebec": "CA", "alberta": "CA", "manitoba": "CA",
+    "saskatchewan": "CA", "yukon": "CA", "queensland": "AU", "tasmania": "AU",
+    "bavaria": "DE", "catalonia": "ES", "andalusia": "ES", "tuscany": "IT",
+    "sicily": "IT", "flanders": "BE", "wallonia": "BE",
+}
+
+
 def load_wikipedia() -> dict:
     """Human-curated origins, the most precise source available.
 
@@ -163,6 +247,50 @@ def load_wikipedia() -> dict:
             rec.update(place=row.get("place"), lat=row.get("lat"), lon=row.get("lon"))
         out[row["slug"]] = rec
     return out
+
+
+def build_city_lookup(cities: list[dict]) -> dict:
+    """Distinctive city word -> id of the most populous city using it.
+
+    Matching previously ran only over cities that already listen to a genre,
+    so a genre with no listening data could never match its own city -- which
+    is exactly the case for most of the taxonomy. This indexes every city.
+    """
+    idx = {}
+    for c in cities:
+        # City keys carry their region ("Louisville Kentucky", "Canberra
+        # Australian Capital Territory"), so indexing every word let a genre
+        # named for a STATE match one city inside it, and let "australian"
+        # match Canberra. Only the city's own words are indexed.
+        region_words = set(re.findall(r"[a-z]{3,}", (c.get("region") or "").lower()))
+        for word in re.findall(r"[a-z]{5,}", c["city"].lower()):
+            if word in CITY_NAME_STOPWORDS or word in region_words:
+                continue
+            cur = idx.get(word)
+            if cur is None or c["pop"] > cities[cur]["pop"]:
+                idx[word] = c["id"]
+    return idx
+
+
+def name_city(genre_name: str, lookup: dict) -> int | None:
+    for word in re.findall(r"[a-z]{5,}", genre_name.lower()):
+        if word in lookup:
+            return lookup[word]
+    return None
+
+
+def name_country(genre_name: str) -> str | None:
+    """Whole-word nationality match only.
+
+    Prefix matching would read "indiana" as India and "romania" as Romanian.
+    A missed match costs one genre; a wrong one puts a sound on the wrong
+    continent.
+    """
+    for token in re.findall(r"[a-z]+", genre_name.lower()):
+        code = DEMONYMS.get(token) or REGION_COUNTRY.get(token)
+        if code:
+            return code
+    return None
 
 
 def main() -> int:
@@ -197,6 +325,16 @@ def main() -> int:
                     continue                    # unknown name/colour: skip
                 meta[g["slug"]] = {"name": e["name"], "color": e["color"]}
                 order.append(g["slug"])
+
+    # EVERY genre in the taxonomy ships, including ones no city listens to and
+    # no country ranks. They previously fell out here -- 314 of them, among
+    # them classical, power metal and symphonic metal -- yet each still has a
+    # name, a colour, a preview clip, and often a documented origin. Dropping
+    # them made them unsearchable and unplayable for no gain.
+    for slug, e in enrich.items():
+        if slug not in meta:
+            meta[slug] = {"name": e["name"], "color": e["color"]}
+            order.append(slug)
     gid = {slug: i for i, slug in enumerate(order)}
 
     # ---- pass 2: cities, with genres referenced by integer id.
@@ -222,6 +360,7 @@ def main() -> int:
         })
 
     # ---- pass 3: genre records, parallel to `order`.
+    city_lookup = build_city_lookup(cities)
     genres = []
     for i, slug in enumerate(order):
         m, e = meta[slug], enrich.get(slug, {})
@@ -233,12 +372,12 @@ def main() -> int:
         # A genre whose name contains one of its own cities is very likely
         # from there. Weaker than MusicBrainz, but it covers genres MusicBrainz
         # has no tag for.
-        named = None
-        for c, _ in sorted(h, key=lambda t: -t[1]):
-            first = cities[c]["city"].split()[0].lower()
-            if len(first) > 3 and re.search(rf"\b{re.escape(first)}\b", m["name"].lower()):
-                named = c
-                break
+        # Nationality and region are checked FIRST. They are less precise than
+        # a city but far safer: "australian blues" is Australian music, not
+        # Canberra music, and "ontario indie" means the province, not the town
+        # of Ontario, California.
+        nat = name_country(m["name"])
+        named = None if nat else name_city(m["name"], city_lookup)
 
         genres.append({
             "slug": slug, "name": m["name"], "color": m["color"],
@@ -249,7 +388,8 @@ def main() -> int:
             # encyclopedia entry never reads the same as a statistical guess.
             "wiki": wiki.get(slug),   # human-curated, may be city or country level
             "mb": origins.get(slug),  # inferred from MusicBrainz artist areas
-            "origin": named,          # weakest: the genre's own name
+            "origin": named,          # a city named in the genre's own name
+            "nat": nat,               # weakest: a nationality in the name
             "preview": e.get("preview_url"),
             "example": e.get("example"),
         })
@@ -274,7 +414,10 @@ def main() -> int:
         "cities": len(cities), "genres": len(genres),
         "links": sum(len(c["g"]) for c in cities),
         "withAudio": sum(1 for g in genres if g["preview"]),
-        "withOrigin": sum(1 for g in genres if g["wiki"] or g["mb"] or g["origin"] is not None),
+        "withOrigin": sum(1 for g in genres
+                          if g["wiki"] or g["mb"] or g["origin"] is not None or g["nat"]),
+        "withNameCity": sum(1 for g in genres if g["origin"] is not None),
+        "withNameCountry": sum(1 for g in genres if g["nat"]),
         "withWiki": sum(1 for g in genres if g["wiki"]),
         "withWikiCity": sum(1 for g in genres if (g["wiki"] or {}).get("level") == "city"),
         "withMbOrigin": sum(1 for g in genres if g["mb"]),

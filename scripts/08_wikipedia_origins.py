@@ -61,8 +61,17 @@ TIMEOUT = 45
 # while accepting MusicBrainz and archive.org. certifi ships a current one.
 CTX = ssl.create_default_context(cafile=certifi.where())
 
+# Citations must be removed from the WHOLE page before the field is matched,
+# not from the captured text afterwards. A well-cited article puts a long
+# <ref>{{Cite web ...}}</ref> immediately after the value, which pushes the
+# next infobox field past the capture window so the pattern matches nothing at
+# all and the field is silently dropped. That cost 50 genres including trap
+# music (Atlanta), reggaeton and disco -- the well-sourced ones, precisely
+# because they are well sourced.
+REF = re.compile(r"<ref[^>]*>.*?</ref>|<ref[^>]*/>", re.S | re.I)
+
 CULTURAL = re.compile(
-    r"\|\s*cultural_origins\s*=\s*(.{0,260}?)(?=\n\s*\|\s*\w+\s*=|\n\}\})", re.S | re.I
+    r"\|\s*cultural_origins\s*=\s*(.{0,400}?)(?=\n\s*\|\s*\w+\s*=|\n\}\})", re.S | re.I
 )
 # A capture that still contains "<word> =" ran past the end of the field into
 # the next one, which produced nonsense like an instruments list being read as
@@ -130,9 +139,36 @@ def parse_date(text: str) -> str | None:
     return f"{qualifier} {m.group(2)}s".strip() if qualifier else m.group(2)
 
 
+# Modifiers that wrap a real place name. Stripping exactly these turns
+# "Greater Los Angeles" into "Los Angeles" and "New York metropolitan area"
+# into "New York", without the free-form word chopping that previously reduced
+# fragments until something -- anything -- matched.
+LEADING_DROP = {"greater", "south", "southern", "north", "northern", "east",
+                "eastern", "west", "western", "central", "the", "in", "of",
+                "zone", "upper", "lower", "metropolitan", "metro", "around",
+                "near", "modern", "early", "late", "mid"}
+TRAILING_DROP = {"area", "areas", "region", "regions", "metropolitan", "metro",
+                 "province", "state", "county", "district", "suburbs", "coast",
+                 "peninsula", "valley"}
+
+
+def trim_place(name: str) -> str:
+    words = name.split()
+    while words and words[0].lower() in LEADING_DROP:
+        words = words[1:]
+    while words and words[-1].lower() in TRAILING_DROP:
+        words = words[:-1]
+    return " ".join(words)
+
+
 def place_candidates(text: str) -> list[str]:
     """Comma-separated parts, most specific first, with the date removed."""
     body = DATE.sub("", text)
+    # Parentheses enclose real lists: "United States (Los Angeles, New York
+    # City, San Francisco)". Treated as separators the names stay whole; left
+    # in place, "(Los Angeles" split into "Angeles" and matched Angeles City in
+    # the Philippines for dance-punk.
+    body = body.replace("(", ",").replace(")", ",")
     parts = [p.strip(" ,;.–-") for p in re.split(r",|/|;| and ", body)]
     return [p for p in parts if 2 < len(p) < 60 and not p.lower().startswith("disputed")]
 
@@ -196,7 +232,7 @@ def main() -> int:
 
                 if text and IS_MUSIC_INFOBOX.search(text):
                     rec["title"] = g["name"]
-                    m = CULTURAL.search(text)
+                    m = CULTURAL.search(REF.sub("", text))
                     if m:
                         field = strip_markup(m.group(1))
                         if field and not SPILLED.search(field):
@@ -228,25 +264,35 @@ def locate(candidates, ccmap, geo, index, anyname) -> dict | None:
     worth recording, and "Early 2000s, London" names no country at all so the
     city has to be found without one.
     """
-    country = None
-    for c in reversed(candidates):
+    # Collect EVERY country named, in order. A field may name several
+    # ("United States (Los Angeles...) and England (Leeds)"), and the order is
+    # not reliable: "City, Country" is common but parentheses invert it. Fixing
+    # on one country made Los Angeles unmatchable and handed dance-punk to
+    # Leeds, so each candidate is tried against all of them.
+    codes = []
+    for c in candidates:
         code = ccmap.get(geo.norm(c))
-        if code:
-            country = code
-            break
+        if code and code not in codes:
+            codes.append(code)
 
     for cand in candidates:
         if geo.norm(cand) in NOT_A_CITY:
             continue
-        words = cand.split()
-        # Drop leading words so "South Zone of Rio de Janeiro" still finds
-        # "Rio de Janeiro".
-        for start in range(len(words)):
-            name = " ".join(words[start:])
+        # Try the candidate as written, then with known wrapper words removed.
+        # Dropping arbitrary leading words instead reduced "New York
+        # metropolitan area" to fragments until one matched a small town in
+        # Illinois, so only recognised modifiers are stripped now.
+        for name in dict.fromkeys([cand, trim_place(cand)]):
             key = geo.norm(name)
             if len(name) < MIN_NAME_LEN or key in NOT_A_CITY or ccmap.get(key):
                 continue                      # too short, a region, or the country
-            hit = geo.match(name, name, country, index) if country else anyname.get(key)
+            hit = None
+            for code in codes:
+                hit = geo.match(name, name, code, index)
+                if hit:
+                    break
+            if hit is None and not codes:
+                hit = anyname.get(key)   # no country named at all: "…, London"
             if hit and hit["pop"] >= MIN_POP:
                 return {"level": "city", "place": hit["name"],
                         "country": hit["country"], "region": hit["region"],
@@ -255,7 +301,7 @@ def locate(candidates, ccmap, geo, index, anyname) -> dict | None:
     # No city resolved, but the country is still a real answer worth keeping.
     # No coordinates: the frontend already has country label points, and
     # inventing a centroid would imply precision we do not have.
-    return {"level": "country", "country": country} if country else None
+    return {"level": "country", "country": codes[0]} if codes else None
 
 
 def fetch(chunk) -> dict | None:
