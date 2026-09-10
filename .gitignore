@@ -1,0 +1,24 @@
+# Dependencies and build output
+node_modules/
+dist/
+.vite/
+
+# Downloaded and derived data. All of it is regenerable by running the
+# pipeline (see README), and none of it is ours to redistribute.
+data/cache/
+data/out/
+public/data/
+
+# Manually saved Every Noise pages. These are Glenn McDonald's work, saved by
+# hand for local parsing only. They must never be committed or republished.
+data/raw/*.html
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Local editor and OS noise
+.DS_Store
+Thumbs.db
+*.log
+.claude/settings.local.json
