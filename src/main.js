@@ -74,11 +74,11 @@ const player = new Player((s) => {
     $("#np-sub").textContent = "";
     setTimeout(() => np.classList.remove("show"), 3400);
   } else if (s.slug) {
-    np.classList.add("show");
+    np.classList.add("show", "playing");
     $("#np-name").textContent = s.genre.name;
     $("#np-sub").textContent = s.source === "loading" ? "finding a clip…" : s.source;
   } else {
-    np.classList.remove("show");
+    np.classList.remove("show", "playing");
     $("#bar i").style.width = "0%";
   }
   syncPlaying();
@@ -88,6 +88,38 @@ player.audio.addEventListener("timeupdate", () => {
   const { currentTime: t, duration: d } = player.audio;
   if (d) $("#bar i").style.width = `${(t / d) * 100}%`;
 });
+
+// ---- volume -------------------------------------------------------------
+// Remembered per browser. localStorage can throw outright in private mode or
+// with site data blocked, so every access is guarded and falls back to 0.85.
+const VOL_KEY = "soundmap.volume";
+const volEl = $("#vol");
+const muteEl = $("#vol-mute");
+let lastAudible = 0.85;
+
+function applyVolume(v, persist = true) {
+  v = Math.min(1, Math.max(0, v));
+  player.audio.volume = v;
+  volEl.value = Math.round(v * 100);
+  muteEl.classList.toggle("muted", v === 0);
+  muteEl.setAttribute("aria-label", v === 0 ? "Unmute" : "Mute");
+  if (v > 0) lastAudible = v;
+  if (persist) { try { localStorage.setItem(VOL_KEY, String(v)); } catch {} }
+}
+
+let startVolume = 0.85;
+try {
+  const saved = parseFloat(localStorage.getItem(VOL_KEY));
+  if (Number.isFinite(saved)) startVolume = saved;
+} catch {}
+applyVolume(startVolume, false);
+
+volEl.addEventListener("input", () => applyVolume(volEl.value / 100));
+muteEl.addEventListener("click", () => applyVolume(player.audio.volume > 0 ? 0 : lastAudible));
+// The slider lives inside the globe's pointer area; don't let arrow keys or
+// drags there reach the globe controls or the space-to-play shortcut.
+volEl.addEventListener("keydown", (e) => e.stopPropagation());
+volEl.addEventListener("pointerdown", (e) => e.stopPropagation());
 
 function syncPlaying() {
   const slug = player.slug;
